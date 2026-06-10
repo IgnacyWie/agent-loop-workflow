@@ -19,11 +19,15 @@ function makeTempRepo() {
 }
 
 function writeFakeGh(dir, script) {
+	return writeFakeCommand(dir, "gh", script)
+}
+
+function writeFakeCommand(dir, name, script) {
 	const binDir = join(dir, "bin")
-	const ghPath = join(binDir, "gh")
+	const commandPath = join(binDir, name)
 	mkdirSync(binDir, { recursive: true })
-	writeFileSync(ghPath, script)
-	chmodSync(ghPath, 0o755)
+	writeFileSync(commandPath, script)
+	chmodSync(commandPath, 0o755)
 	return binDir
 }
 
@@ -36,6 +40,28 @@ function runCli(cwd, binDir, args) {
 		},
 		encoding: "utf8",
 	})
+}
+
+function runGit(cwd, args) {
+	const result = spawnSync("git", args, {
+		cwd,
+		encoding: "utf8",
+	})
+	assert.equal(
+		result.status,
+		0,
+		`git ${args.join(" ")} failed: ${result.stderr || result.stdout}`,
+	)
+	return result
+}
+
+function initGitRepo(cwd) {
+	runGit(cwd, ["init", "-b", "main"])
+	runGit(cwd, ["config", "user.email", "agent-loop@example.com"])
+	runGit(cwd, ["config", "user.name", "Agent Loop Test"])
+	writeFileSync(join(cwd, "README.md"), "test repo\n")
+	runGit(cwd, ["add", "README.md"])
+	runGit(cwd, ["commit", "-m", "initial commit"])
 }
 
 test("dry run prints execution waves and dependency tree", () => {
@@ -108,4 +134,51 @@ exit 0
 	assert.match(calls, /label create automated-agent --color 5319E7/)
 	assert.match(calls, /label create aa-in-progress --color FBCA04/)
 	assert.match(result.stdout, /Label setup complete\./)
+})
+
+test("failed agent runs do not comment on the GitHub issue", () => {
+	const cwd = makeTempRepo()
+	const commandDir = makeTempRepo()
+	initGitRepo(cwd)
+	const callsPath = join(commandDir, "gh-calls")
+	const issues = [{ number: 19, title: "hello world", body: "hello world" }]
+	const binDir = writeFakeGh(
+		commandDir,
+		`#!/bin/sh
+echo "$*" >> "${callsPath}"
+if [ "$1 $2" = "issue list" ]; then
+	cat <<'JSON'
+${JSON.stringify(issues)}
+JSON
+	exit 0
+fi
+if [ "$1 $2" = "label create" ]; then
+	exit 0
+fi
+if [ "$1 $2" = "issue edit" ]; then
+	exit 0
+fi
+if [ "$1 $2" = "issue comment" ]; then
+	exit 0
+fi
+echo "unexpected gh command: $*" >&2
+exit 1
+`,
+	)
+	writeFakeCommand(
+		commandDir,
+		"codex",
+		`#!/bin/sh
+exit 42
+`,
+	)
+
+	const result = runCli(cwd, binDir, [])
+	const calls = readFileSync(callsPath, "utf8")
+
+	assert.equal(result.status, 1)
+	assert.match(result.stdout, /FAIL  #19: agent exited with code 42/)
+	assert.match(result.stdout, /unresolved issues: #19 failed/)
+	assert.match(calls, /issue edit 19 --add-label aa-in-progress/)
+	assert.doesNotMatch(calls, /issue comment/)
 })
