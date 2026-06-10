@@ -1,0 +1,30 @@
+{
+	"name": "agent-loop-workflow",
+	"version": "0.1.0",
+	"description": "Run labeled GitHub issues through coding agents in isolated git worktrees.",
+	"type": "module",
+	"bin": {
+		"agent-loop": "./bin/agent-loop.js"
+	},
+	"files": [
+		"bin",
+		"README.md",
+		"LICENSE"
+	],
+	"scripts": {
+		"check": "node --check bin/agent-loop.js"
+	},
+	"keywords": [
+		"agents",
+		"github",
+		"workflow",
+		"codex",
+		"claude",
+		"worktree"
+	],
+	"author": "Ignacy Wielogorski",
+	"license": "MIT",
+	"engines": {
+		"node": ">=20"
+	}
+}

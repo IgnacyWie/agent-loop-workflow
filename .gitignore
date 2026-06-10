@@ -1,0 +1,4 @@
+node_modules/
+agent-loop-*.log
+.agent-worktrees/
+.DS_Store
