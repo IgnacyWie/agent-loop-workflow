@@ -12,7 +12,8 @@
 		"LICENSE"
 	],
 	"scripts": {
-		"check": "node --check bin/agent-loop.js"
+		"check": "node --check bin/agent-loop.js",
+		"setup:labels": "node bin/agent-loop.js --setup-labels"
 	},
 	"keywords": [
 		"agents",

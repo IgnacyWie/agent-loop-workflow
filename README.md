@@ -46,6 +46,7 @@ agent-loop --agent codex
 agent-loop --agent claude
 agent-loop --parallel 3
 agent-loop --dry-run
+agent-loop --setup-labels
 agent-loop --labels ready-for-agent,automated-agent
 agent-loop --worktree-dir ../agent-worktrees
 ```
@@ -56,6 +57,18 @@ By default, `agent-loop` selects open issues with both labels:
 - `automated-agent`
 
 It creates or updates the `aa-in-progress` label when an issue starts.
+
+Before running a repository for the first time, create the expected issue labels:
+
+```sh
+agent-loop --setup-labels
+```
+
+This creates or updates the configured required labels and the in-progress label in the current GitHub repository, then exits. For custom labels, pass the same label options you use for normal runs:
+
+```sh
+agent-loop --setup-labels --labels ready-for-agent,automated-agent --in-progress-label aa-in-progress
+```
 
 ## Dependency Detection
 
@@ -90,6 +103,7 @@ Supported section forms:
 | `--worktree-dir <path>` | `.agent-worktrees` | Directory for git worktrees |
 | `--base-branch <branch>` | current branch | Branch used for new issue worktrees |
 | `--repo-name <name>` | current directory name | Human-readable repository name in agent prompts |
+| `--setup-labels` | `false` | Create or update required GitHub issue labels, then exit |
 | `--dry-run` | `false` | Print planned execution waves without running agents |
 | `--no-close` | `false` | Merge successful branches but do not close GitHub issues |
 | `--help` | | Show help |

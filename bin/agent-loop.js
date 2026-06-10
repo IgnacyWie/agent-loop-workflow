@@ -7,6 +7,9 @@ import process from "node:process"
 
 const DEFAULT_LABELS = ["ready-for-agent", "automated-agent"]
 const DEFAULT_IN_PROGRESS_LABEL = "aa-in-progress"
+const READY_LABEL_COLOR = "0E8A16"
+const AUTOMATED_LABEL_COLOR = "5319E7"
+const CUSTOM_LABEL_COLOR = "1D76DB"
 const IN_PROGRESS_LABEL_COLOR = "FBCA04"
 const SUPPORTED_AGENTS = ["codex", "claude"]
 const MAX_PARALLEL = 5
@@ -59,6 +62,7 @@ Options:
   --worktree-dir <path>        Directory for git worktrees. Default: .agent-worktrees
   --base-branch <branch>       Branch used for new worktrees. Default: current branch
   --repo-name <name>           Repository name used in prompts. Default: current directory
+  --setup-labels               Create or update required GitHub issue labels, then exit
   --dry-run                    Print execution waves without running agents
   --no-close                   Do not close GitHub issues after successful merge
   --help                       Show this help
@@ -123,6 +127,7 @@ function parseConfig() {
 			readFlag("--repo-name") ??
 			process.env.AGENT_LOOP_REPO_NAME ??
 			basename(process.cwd()),
+		setupLabels: hasFlag("--setup-labels"),
 		dryRun: hasFlag("--dry-run"),
 		noClose,
 	}
@@ -289,16 +294,42 @@ async function fetchEligibleIssues(labels) {
 	return JSON.parse(result.stdout)
 }
 
-async function ensureInProgressLabelExists(label) {
+function labelConfig(label, inProgressLabel) {
+	if (label === inProgressLabel) {
+		return {
+			color: IN_PROGRESS_LABEL_COLOR,
+			description: "Automated agent is working on this issue",
+		}
+	}
+	if (label === "ready-for-agent") {
+		return {
+			color: READY_LABEL_COLOR,
+			description: "Issue is ready for an automated coding agent",
+		}
+	}
+	if (label === "automated-agent") {
+		return {
+			color: AUTOMATED_LABEL_COLOR,
+			description: "Issue can be processed by agent-loop",
+		}
+	}
+	return {
+		color: CUSTOM_LABEL_COLOR,
+		description: "Issue label used by agent-loop",
+	}
+}
+
+async function ensureLabelExists(label, config) {
+	const labelDetails = labelConfig(label, config.inProgressLabel)
 	const createResult = await runCommand([
 		"gh",
 		"label",
 		"create",
 		label,
 		"--color",
-		IN_PROGRESS_LABEL_COLOR,
+		labelDetails.color,
 		"--description",
-		"Automated agent is working on this issue",
+		labelDetails.description,
 	])
 
 	if (createResult.exitCode === 0) return
@@ -309,9 +340,9 @@ async function ensureInProgressLabelExists(label) {
 		"edit",
 		label,
 		"--color",
-		IN_PROGRESS_LABEL_COLOR,
+		labelDetails.color,
 		"--description",
-		"Automated agent is working on this issue",
+		labelDetails.description,
 	])
 
 	if (editResult.exitCode !== 0) {
@@ -324,6 +355,17 @@ async function ensureInProgressLabelExists(label) {
 			}`,
 		)
 	}
+}
+
+async function setupLabels(config) {
+	for (const label of [...new Set([...config.labels, config.inProgressLabel])]) {
+		await ensureLabelExists(label, config)
+		log(`LABEL ${label}: ready`)
+	}
+}
+
+async function ensureInProgressLabelExists(label) {
+	await ensureLabelExists(label, { inProgressLabel: label })
 }
 
 async function labelIssueInProgress(issue, label) {
@@ -726,6 +768,13 @@ async function runScheduler(ordered, baseBranch, config) {
 
 async function main() {
 	const config = parseConfig()
+
+	if (config.setupLabels) {
+		await setupLabels(config)
+		log("Label setup complete.")
+		return
+	}
+
 	const issues = await fetchEligibleIssues(config.labels)
 
 	if (issues.length === 0) {
