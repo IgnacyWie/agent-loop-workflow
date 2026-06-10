@@ -23,7 +23,15 @@ Run without installing:
 npx github:IgnacyWie/agent-loop-workflow --dry-run
 ```
 
-Install globally:
+Install with Homebrew:
+
+```sh
+brew tap IgnacyWie/tap
+brew install agent-loop-workflow
+agent-loop --dry-run
+```
+
+Install globally with npm:
 
 ```sh
 npm install -g github:IgnacyWie/agent-loop-workflow
