@@ -70,6 +70,12 @@ This creates or updates the configured required labels and the in-progress label
 agent-loop --setup-labels --labels ready-for-agent,automated-agent --in-progress-label aa-in-progress
 ```
 
+## Matt Pocock AI Skills
+
+`agent-loop` works perfectly with [Matt Pocock's AI skills](https://github.com/mattpocock/skills), especially `grill-me`, `to-prd`, and `to-issues`.
+
+Use those skills to stress-test an idea, turn it into a PRD, and break it into independently-grabbable GitHub issues. Then label the ready issues for `agent-loop` to run through coding agents in dependency order.
+
 ## Dependency Detection
 
 Dependencies are inferred from issue bodies. If both issues are in the selected set, `agent-loop` waits for the dependency issue to complete first.
