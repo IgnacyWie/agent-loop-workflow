@@ -13,6 +13,8 @@
 	],
 	"scripts": {
 		"check": "node --check bin/agent-loop.js",
+		"test": "node --test",
+		"test:package": "npm pack --dry-run",
 		"setup:labels": "node bin/agent-loop.js --setup-labels"
 	},
 	"keywords": [

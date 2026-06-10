@@ -170,6 +170,84 @@ function buildDependencyMap(issues) {
 	)
 }
 
+function titleForIssue(issue) {
+	return `#${issue.number} ${issue.title}`.replace(/\s+/g, " ").trim()
+}
+
+function formatIssueList(numbers, issueMap) {
+	return numbers
+		.map((number) => {
+			const issue = issueMap.get(number)
+			return issue ? titleForIssue(issue) : `#${number}`
+		})
+		.join(", ")
+}
+
+function buildBlockingMap(issues, deps) {
+	const blocking = new Map(issues.map((issue) => [issue.number, []]))
+
+	for (const [issueNumber, issueDeps] of deps.entries()) {
+		for (const dep of issueDeps) {
+			blocking.get(dep)?.push(issueNumber)
+		}
+	}
+
+	for (const blockedIssues of blocking.values()) {
+		blockedIssues.sort((a, b) => a - b)
+	}
+
+	return blocking
+}
+
+function renderDependencyTree(issues) {
+	const issueMap = new Map(issues.map((issue) => [issue.number, issue]))
+	const deps = buildDependencyMap(issues)
+	const blocking = buildBlockingMap(issues, deps)
+	const roots = issues
+		.filter((issue) => (deps.get(issue.number) ?? []).length === 0)
+		.map((issue) => issue.number)
+	const visited = new Set()
+	const lines = ["Dependency tree:"]
+
+	function renderNode(issueNumber, prefix = "") {
+		const issue = issueMap.get(issueNumber)
+		if (!issue) return
+
+		const issueDeps = deps.get(issueNumber) ?? []
+		const blockedIssues = blocking.get(issueNumber) ?? []
+		const repeated = visited.has(issueNumber)
+		visited.add(issueNumber)
+
+		lines.push(`${prefix}${titleForIssue(issue)}${repeated ? " (shown above)" : ""}`)
+
+		if (issueDeps.length > 0) {
+			lines.push(`${prefix}  blocked by: ${formatIssueList(issueDeps, issueMap)}`)
+		} else {
+			lines.push(`${prefix}  blocked by: none`)
+		}
+
+		if (blockedIssues.length > 0) {
+			lines.push(`${prefix}  unblocks: ${formatIssueList(blockedIssues, issueMap)}`)
+		} else {
+			lines.push(`${prefix}  unblocks: none`)
+		}
+
+		if (repeated) return
+
+		for (const [index, blockedIssue] of blockedIssues.entries()) {
+			const isLast = index === blockedIssues.length - 1
+			lines.push(`${prefix}${isLast ? "`-" : "+-"} blocked issue:`)
+			renderNode(blockedIssue, `${prefix}${isLast ? "   " : "|  "}`)
+		}
+	}
+
+	for (const root of roots) {
+		renderNode(root)
+	}
+
+	return lines
+}
+
 function topologicalSort(issues) {
 	const issueMap = new Map(issues.map((issue) => [issue.number, issue]))
 	const deps = buildDependencyMap(issues)
@@ -788,9 +866,12 @@ async function main() {
 	for (const [index, wave] of waves.entries()) {
 		log(
 			`Wave ${index + 1}: ${wave
-				.map((issue) => `#${issue.number} ${issue.title}`)
+				.map((issue) => titleForIssue(issue))
 				.join(" | ")}`,
 		)
+	}
+	for (const line of renderDependencyTree(ordered)) {
+		log(line)
 	}
 
 	if (config.dryRun) {

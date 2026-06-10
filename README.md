@@ -88,6 +88,8 @@ Use those skills to stress-test an idea, turn it into a PRD, and break it into i
 
 Dependencies are inferred from issue bodies. If both issues are in the selected set, `agent-loop` waits for the dependency issue to complete first.
 
+Dry runs and normal runs print execution waves followed by a dependency tree. Each issue shows what blocks it and what it unblocks, so you can see the runnable issues and blocked follow-up work before agents start.
+
 Supported inline forms:
 
 ```md
@@ -133,6 +135,14 @@ AGENT_LOOP_WORKTREE_DIR=.agent-worktrees
 AGENT_LOOP_BASE_BRANCH=main
 AGENT_LOOP_REPO_NAME=my-repo
 AGENT_LOOP_NO_CLOSE=1
+```
+
+## Development
+
+```sh
+npm run check
+npm test
+npm run test:package
 ```
 
 ## Safety Model
