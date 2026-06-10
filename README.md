@@ -126,6 +126,7 @@ Supported section forms:
 | `--setup-labels` | `false` | Create or update required GitHub issue labels, then exit |
 | `--dry-run` | `false` | Print planned execution waves without running agents |
 | `--no-close` | `false` | Merge successful branches but do not close GitHub issues |
+| `--no-push` | `false` | Merge successful branches but do not push the launching branch |
 | `--help` | | Show help |
 
 Environment variable equivalents:
@@ -141,6 +142,7 @@ AGENT_LOOP_REPO_NAME=my-repo
 AGENT_LOOP_TMUX=1
 AGENT_LOOP_TMUX_ATTACH=0
 AGENT_LOOP_NO_CLOSE=1
+AGENT_LOOP_NO_PUSH=1
 ```
 
 ## Tmux Mode
@@ -172,13 +174,13 @@ npm run test:package
 
 ## Safety Model
 
-Before running agents, `agent-loop` requires the main worktree to be clean. Each issue gets a branch named `agent/issue-N` and a separate worktree. Successful branches are merged into the branch where you launched `agent-loop`.
+Before running agents, `agent-loop` requires the main worktree to be clean. Each issue gets a branch named `agent/issue-N` and a separate worktree. Successful branches are merged into the branch where you launched `agent-loop`, then that launching branch is pushed to `origin`.
 
 If an agent fails, the issue branch and worktree are left in place for inspection, and the GitHub issue is not modified beyond the in-progress label.
 
 ## Agent Prompt
 
-Each agent receives the issue title, body, target branch, worktree path, and generic implementation instructions. The prompt tells the child agent to commit its changes and not close or comment on the issue, because `agent-loop` owns merge and closure.
+Each agent receives the issue title, body, target branch, worktree path, and generic implementation instructions. The prompt tells the child agent to commit its changes and not push, close, or comment on the issue, because `agent-loop` owns merge, push, and closure.
 
 ## Publishing to npm
 

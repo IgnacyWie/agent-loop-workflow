@@ -136,6 +136,66 @@ exit 0
 	assert.match(result.stdout, /Label setup complete\./)
 })
 
+test("successful agent runs merge and push through the launching branch", () => {
+	const cwd = makeTempRepo()
+	const commandDir = makeTempRepo()
+	const remote = makeTempRepo()
+	initGitRepo(cwd)
+	runGit(remote, ["init", "--bare"])
+	runGit(cwd, ["remote", "add", "origin", remote])
+	runGit(cwd, ["push", "origin", "main"])
+
+	const callsPath = join(commandDir, "gh-calls")
+	const issues = [{ number: 22, title: "add feature file", body: "add feature" }]
+	const binDir = writeFakeGh(
+		commandDir,
+		`#!/bin/sh
+echo "$*" >> "${callsPath}"
+if [ "$1 $2" = "issue list" ]; then
+	cat <<'JSON'
+${JSON.stringify(issues)}
+JSON
+	exit 0
+fi
+if [ "$1 $2" = "label create" ]; then
+	exit 0
+fi
+if [ "$1 $2" = "issue edit" ]; then
+	exit 0
+fi
+if [ "$1 $2" = "issue close" ]; then
+	exit 0
+fi
+echo "unexpected gh command: $*" >&2
+exit 1
+`,
+	)
+	writeFakeCommand(
+		commandDir,
+		"codex",
+		`#!/bin/sh
+printf "implemented\\n" > feature.txt
+git add feature.txt
+git commit -m "feat: implement issue 22"
+exit 0
+`,
+	)
+
+	const result = runCli(cwd, binDir, [])
+	const calls = readFileSync(callsPath, "utf8")
+	const mainLog = runGit(cwd, ["log", "--oneline", "-1", "main"]).stdout
+	const remoteFile = runGit(cwd, ["show", "origin/main:feature.txt"]).stdout
+
+	assert.equal(result.status, 0, result.stderr)
+	assert.match(result.stdout, /MERGE #22: agent\/issue-22/)
+	assert.match(result.stdout, /PUSH  main: origin\/main/)
+	assert.match(result.stdout, /Agent loop complete\./)
+	assert.match(mainLog, /merge: automated issue #22/)
+	assert.equal(readFileSync(join(cwd, "feature.txt"), "utf8"), "implemented\n")
+	assert.equal(remoteFile, "implemented\n")
+	assert.match(calls, /issue close 22 --comment Implemented by automated agent loop/)
+})
+
 test("failed agent runs do not comment on the GitHub issue", () => {
 	const cwd = makeTempRepo()
 	const commandDir = makeTempRepo()

@@ -66,6 +66,7 @@ Options:
   --setup-labels               Create or update required GitHub issue labels, then exit
   --dry-run                    Print execution waves without running agents
   --no-close                   Do not close GitHub issues after successful merge
+  --no-push                    Do not push the launching branch after successful merge
   --help                       Show this help
 `)
 }
@@ -109,6 +110,10 @@ function parseConfig() {
 		hasFlag("--no-close") ||
 		process.env.AGENT_LOOP_NO_CLOSE === "1" ||
 		process.env.AGENT_LOOP_NO_CLOSE === "true"
+	const noPush =
+		hasFlag("--no-push") ||
+		process.env.AGENT_LOOP_NO_PUSH === "1" ||
+		process.env.AGENT_LOOP_NO_PUSH === "true"
 	const tmux =
 		hasFlag("--tmux") ||
 		process.env.AGENT_LOOP_TMUX === "1" ||
@@ -140,6 +145,7 @@ function parseConfig() {
 		setupLabels: hasFlag("--setup-labels"),
 		dryRun: hasFlag("--dry-run"),
 		noClose,
+		noPush,
 		tmux,
 		tmuxAttach,
 	}
@@ -776,7 +782,8 @@ function buildPrompt(issue, config) {
 		"- Follow the repository's existing conventions and agent instructions.",
 		"- Add or update focused tests for the behavior you change when the repository has a test setup.",
 		`- Commit your changes with a message referencing the issue, for example: "feat: implement thing close #${issue.number}".`,
-		"- Do not close or comment on the GitHub issue. The parent agent-loop process handles issue closure after merge.",
+		"- Do not push the branch.",
+		"- Do not close or comment on the GitHub issue. The parent agent-loop process handles merge, push, and issue closure.",
 		"- If you cannot fully implement the issue, exit non-zero or leave the worktree uncommitted with notes in your final output.",
 	].join("\n")
 }
@@ -874,10 +881,28 @@ async function closeIssue(issue) {
 	])
 }
 
+async function assertOnLaunchBranch(config) {
+	const currentBranch = await getCurrentBranch()
+	if (currentBranch !== config.launchBranch) {
+		throw new Error(
+			`Main worktree is on ${currentBranch}, but agent-loop launched from ${config.launchBranch}. Switch back before merging.`,
+		)
+	}
+}
+
+async function pushLaunchBranch(config) {
+	if (config.noPush) return
+	await assertOnLaunchBranch(config)
+	log(`PUSH  ${config.launchBranch}: origin/${config.launchBranch}`)
+	await runRequiredCommand(["git", "push", "origin", config.launchBranch])
+}
+
 async function mergeIssueResult(result, config) {
 	const { issue, branchName, worktreePath } = result
+	await assertOnLaunchBranch(config)
 
 	if (result.alreadyMerged || (await branchMergedIntoHead(branchName))) {
+		await pushLaunchBranch(config)
 		if (!config.noClose) await closeIssue(issue)
 		await removeIssueWorktreeIfPresent(worktreePath)
 		log(`CLOSED #${issue.number}: already merged and removed worktree`)
@@ -915,6 +940,7 @@ async function mergeIssueResult(result, config) {
 		)
 	}
 
+	await pushLaunchBranch(config)
 	if (!config.noClose) await closeIssue(issue)
 	await removeIssueWorktreeIfPresent(worktreePath)
 	log(`CLOSED #${issue.number}: merged and removed worktree`)
@@ -1057,7 +1083,8 @@ async function main() {
 	}
 
 	await assertCleanWorktree()
-	const baseBranch = config.baseBranch ?? (await getCurrentBranch())
+	config.launchBranch = await getCurrentBranch()
+	const baseBranch = config.baseBranch ?? config.launchBranch
 	if (config.tmux) await setupTmux(config)
 	let states
 	try {
