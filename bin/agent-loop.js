@@ -62,6 +62,7 @@ Options:
   --base-branch <branch>       Branch used for new worktrees. Default: current branch
   --repo-name <name>           Repository name used in prompts. Default: current directory
   --tmux                       Run agents in tmux with one window per wave and split panes per issue
+  --no-tmux-attach             Do not automatically attach to the tmux session
   --setup-labels               Create or update required GitHub issue labels, then exit
   --dry-run                    Print execution waves without running agents
   --no-close                   Do not close GitHub issues after successful merge
@@ -112,6 +113,11 @@ function parseConfig() {
 		hasFlag("--tmux") ||
 		process.env.AGENT_LOOP_TMUX === "1" ||
 		process.env.AGENT_LOOP_TMUX === "true"
+	const tmuxAttach =
+		tmux &&
+		!hasFlag("--no-tmux-attach") &&
+		process.env.AGENT_LOOP_TMUX_ATTACH !== "0" &&
+		process.env.AGENT_LOOP_TMUX_ATTACH !== "false"
 
 	return {
 		agent,
@@ -135,6 +141,7 @@ function parseConfig() {
 		dryRun: hasFlag("--dry-run"),
 		noClose,
 		tmux,
+		tmuxAttach,
 	}
 }
 
@@ -385,7 +392,42 @@ async function setupTmux(config) {
 		"sleep 2147483647",
 	])
 	log(`TMUX session: ${config.tmuxSession}`)
-	log(`Attach with: tmux attach -t ${config.tmuxSession}`)
+	log(`Attach with: tmux attach-session -t ${config.tmuxSession}`)
+	if (config.tmuxAttach) {
+		await attachTmux(config)
+	}
+}
+
+async function attachTmux(config) {
+	if (!process.stdin.isTTY) {
+		log("TMUX auto-attach skipped: stdin is not a TTY")
+		return
+	}
+
+	if (process.env.TMUX) {
+		const result = await runCommand([
+			"tmux",
+			"switch-client",
+			"-t",
+			config.tmuxSession,
+		])
+		if (result.exitCode !== 0) {
+			throw new Error(`tmux switch-client failed: ${result.stderr || result.stdout}`)
+		}
+		log(`TMUX switched current client to ${config.tmuxSession}`)
+		return
+	}
+
+	config.tmuxAttachProcess = spawn(
+		"tmux",
+		["attach-session", "-t", config.tmuxSession],
+		{
+			stdio: "inherit",
+		},
+	)
+	config.tmuxAttachProcess.on("error", (error) => {
+		log(`TMUX attach failed: ${error.message}`)
+	})
 }
 
 async function startTmuxPane(command, issue, options) {

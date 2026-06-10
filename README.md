@@ -54,6 +54,7 @@ agent-loop --agent codex
 agent-loop --agent claude
 agent-loop --parallel 3
 agent-loop --parallel 3 --tmux
+agent-loop --parallel 3 --tmux --no-tmux-attach
 agent-loop --dry-run
 agent-loop --setup-labels
 agent-loop --labels ready-for-agent,automated-agent
@@ -121,6 +122,7 @@ Supported section forms:
 | `--base-branch <branch>` | current branch | Branch used for new issue worktrees |
 | `--repo-name <name>` | current directory name | Human-readable repository name in agent prompts |
 | `--tmux` | `false` | Run agent commands in tmux with one window per dependency wave and split panes for active issues |
+| `--no-tmux-attach` | `false` | Create the tmux session without automatically attaching to it |
 | `--setup-labels` | `false` | Create or update required GitHub issue labels, then exit |
 | `--dry-run` | `false` | Print planned execution waves without running agents |
 | `--no-close` | `false` | Merge successful branches but do not close GitHub issues |
@@ -137,6 +139,7 @@ AGENT_LOOP_WORKTREE_DIR=.agent-worktrees
 AGENT_LOOP_BASE_BRANCH=main
 AGENT_LOOP_REPO_NAME=my-repo
 AGENT_LOOP_TMUX=1
+AGENT_LOOP_TMUX_ATTACH=0
 AGENT_LOOP_NO_CLOSE=1
 ```
 
@@ -148,7 +151,9 @@ Pass `--tmux` to watch active agents in tmux:
 agent-loop --parallel 5 --tmux
 ```
 
-The parent process prints the session name and attach command before agents start. Each dependency wave gets one tmux window/tab named `wave-N`. Issues in that wave run as split panes in the same tab with a tiled layout.
+The parent process prints the session name and attach command before agents start, then automatically attaches to the session when stdin is an interactive terminal. If you launch from inside tmux, `agent-loop` switches the current tmux client to the new session instead. Pass `--no-tmux-attach` or set `AGENT_LOOP_TMUX_ATTACH=0` to create the session without attaching.
+
+Each dependency wave gets one tmux window/tab named `wave-N`. Issues in that wave run as split panes in the same tab with a tiled layout.
 
 Issue panes stay open after the agent exits so you can inspect terminal output without a separate log file. Exit the pane shell when you are done with it. Failed branches and worktrees are still preserved for inspection.
 

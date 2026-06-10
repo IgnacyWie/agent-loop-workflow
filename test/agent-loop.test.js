@@ -86,6 +86,7 @@ test("help documents tmux mode", () => {
 
 	assert.equal(result.status, 0, result.stderr)
 	assert.match(result.stdout, /--tmux\s+Run agents in tmux with one window per wave/)
+	assert.match(result.stdout, /--no-tmux-attach\s+Do not automatically attach/)
 })
 
 test("setup labels creates the required labels and in-progress label", () => {
