@@ -174,7 +174,7 @@ npm run test:package
 
 Before running agents, `agent-loop` requires the main worktree to be clean. Each issue gets a branch named `agent/issue-N` and a separate worktree. Successful branches are merged into the branch where you launched `agent-loop`.
 
-If an agent fails, the issue branch and worktree are left in place for inspection, and the issue receives a failure comment.
+If an agent fails, the issue branch and worktree are left in place for inspection, and the GitHub issue is not modified beyond the in-progress label.
 
 ## Agent Prompt
 

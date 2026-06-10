@@ -920,17 +920,6 @@ async function mergeIssueResult(result, config) {
 	log(`CLOSED #${issue.number}: merged and removed worktree`)
 }
 
-async function commentFailedIssue(result, reason) {
-	await runCommand([
-		"gh",
-		"issue",
-		"comment",
-		String(result.issue.number),
-		"--body",
-		`Automated agent could not complete: ${reason}`,
-	])
-}
-
 function readyIssues(ordered, states, deps) {
 	return ordered.filter((issue) => {
 		if (states.get(issue.number) !== "pending") return false
@@ -961,10 +950,6 @@ function skipBlockedByFailedDependencies(ordered, states, deps) {
 async function handleCompleted(completed, states, config) {
 	if (!completed.result.ok) {
 		states.set(completed.issueNumber, "failed")
-		await commentFailedIssue(
-			completed.result,
-			completed.result.error ?? "agent exited non-zero; branch/worktree left for inspection",
-		)
 		return
 	}
 
@@ -973,7 +958,6 @@ async function handleCompleted(completed, states, config) {
 		states.set(completed.issueNumber, "done")
 	} catch (error) {
 		states.set(completed.issueNumber, "failed")
-		await commentFailedIssue(completed.result, String(error))
 		log(`FAIL  #${completed.issueNumber}: ${error}`)
 	}
 }
