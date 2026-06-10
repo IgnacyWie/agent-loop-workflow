@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
-import { appendFileSync, existsSync, mkdirSync } from "node:fs"
-import { basename, resolve } from "node:path"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { basename, join, resolve } from "node:path"
 import { spawn } from "node:child_process"
+import { tmpdir } from "node:os"
 import process from "node:process"
 
 const DEFAULT_LABELS = ["ready-for-agent", "automated-agent"]
@@ -13,7 +14,6 @@ const CUSTOM_LABEL_COLOR = "1D76DB"
 const IN_PROGRESS_LABEL_COLOR = "FBCA04"
 const SUPPORTED_AGENTS = ["codex", "claude"]
 const MAX_PARALLEL = 5
-const LOG_FILE = `agent-loop-${new Date().toISOString().replace(/[:.]/g, "-")}.log`
 
 const INLINE_DEPENDENCY_PATTERNS = [
 	/\bdepends?\s+on\s+#(\d+)/gi,
@@ -28,7 +28,6 @@ const SECTION_DEPENDENCY_PATTERN =
 function log(message) {
 	const line = `[${new Date().toISOString()}] ${message}`
 	console.log(line)
-	appendFileSync(LOG_FILE, `${line}\n`)
 }
 
 function readFlag(name) {
@@ -62,6 +61,7 @@ Options:
   --worktree-dir <path>        Directory for git worktrees. Default: .agent-worktrees
   --base-branch <branch>       Branch used for new worktrees. Default: current branch
   --repo-name <name>           Repository name used in prompts. Default: current directory
+  --tmux                       Run agents in tmux with one window per wave and split panes per issue
   --setup-labels               Create or update required GitHub issue labels, then exit
   --dry-run                    Print execution waves without running agents
   --no-close                   Do not close GitHub issues after successful merge
@@ -108,6 +108,10 @@ function parseConfig() {
 		hasFlag("--no-close") ||
 		process.env.AGENT_LOOP_NO_CLOSE === "1" ||
 		process.env.AGENT_LOOP_NO_CLOSE === "true"
+	const tmux =
+		hasFlag("--tmux") ||
+		process.env.AGENT_LOOP_TMUX === "1" ||
+		process.env.AGENT_LOOP_TMUX === "true"
 
 	return {
 		agent,
@@ -130,6 +134,7 @@ function parseConfig() {
 		setupLabels: hasFlag("--setup-labels"),
 		dryRun: hasFlag("--dry-run"),
 		noClose,
+		tmux,
 	}
 }
 
@@ -174,15 +179,6 @@ function titleForIssue(issue) {
 	return `#${issue.number} ${issue.title}`.replace(/\s+/g, " ").trim()
 }
 
-function formatIssueList(numbers, issueMap) {
-	return numbers
-		.map((number) => {
-			const issue = issueMap.get(number)
-			return issue ? titleForIssue(issue) : `#${number}`
-		})
-		.join(", ")
-}
-
 function buildBlockingMap(issues, deps) {
 	const blocking = new Map(issues.map((issue) => [issue.number, []]))
 
@@ -203,46 +199,39 @@ function renderDependencyTree(issues) {
 	const issueMap = new Map(issues.map((issue) => [issue.number, issue]))
 	const deps = buildDependencyMap(issues)
 	const blocking = buildBlockingMap(issues, deps)
-	const roots = issues
+	const roots = [...issues]
 		.filter((issue) => (deps.get(issue.number) ?? []).length === 0)
 		.map((issue) => issue.number)
-	const visited = new Set()
+	const rendered = new Set()
 	const lines = ["Dependency tree:"]
 
-	function renderNode(issueNumber, prefix = "") {
+	function renderNode(issueNumber, prefix, isLast) {
 		const issue = issueMap.get(issueNumber)
-		if (!issue) return
+		const connector = isLast ? "`-- " : "|-- "
+		const childPrefix = `${prefix}${isLast ? "    " : "|   "}`
 
-		const issueDeps = deps.get(issueNumber) ?? []
+		if (!issue) {
+			lines.push(`${prefix}${connector}#${issueNumber}`)
+			return
+		}
+
+		const label = titleForIssue(issue)
+		if (rendered.has(issueNumber)) {
+			lines.push(`${prefix}${connector}${label} (shown above)`)
+			return
+		}
+
+		rendered.add(issueNumber)
+		lines.push(`${prefix}${connector}${label}`)
+
 		const blockedIssues = blocking.get(issueNumber) ?? []
-		const repeated = visited.has(issueNumber)
-		visited.add(issueNumber)
-
-		lines.push(`${prefix}${titleForIssue(issue)}${repeated ? " (shown above)" : ""}`)
-
-		if (issueDeps.length > 0) {
-			lines.push(`${prefix}  blocked by: ${formatIssueList(issueDeps, issueMap)}`)
-		} else {
-			lines.push(`${prefix}  blocked by: none`)
-		}
-
-		if (blockedIssues.length > 0) {
-			lines.push(`${prefix}  unblocks: ${formatIssueList(blockedIssues, issueMap)}`)
-		} else {
-			lines.push(`${prefix}  unblocks: none`)
-		}
-
-		if (repeated) return
-
 		for (const [index, blockedIssue] of blockedIssues.entries()) {
-			const isLast = index === blockedIssues.length - 1
-			lines.push(`${prefix}${isLast ? "`-" : "+-"} blocked issue:`)
-			renderNode(blockedIssue, `${prefix}${isLast ? "   " : "|  "}`)
+			renderNode(blockedIssue, childPrefix, index === blockedIssues.length - 1)
 		}
 	}
 
-	for (const root of roots) {
-		renderNode(root)
+	for (const [index, root] of roots.entries()) {
+		renderNode(root, "", index === roots.length - 1)
 	}
 
 	return lines
@@ -316,13 +305,13 @@ async function runCommand(command, options = {}) {
 		proc.stdout.on("data", (chunk) => {
 			const text = chunk.toString()
 			stdout += text
-			if (options.streamToLog) appendFileSync(LOG_FILE, text)
+			if (options.streamOutput) process.stdout.write(text)
 		})
 
 		proc.stderr.on("data", (chunk) => {
 			const text = chunk.toString()
 			stderr += text
-			if (options.streamToLog) appendFileSync(LOG_FILE, text)
+			if (options.streamOutput) process.stderr.write(text)
 		})
 
 		proc.on("error", (error) => {
@@ -345,6 +334,151 @@ async function runRequiredCommand(command, cwd) {
 		)
 	}
 	return result
+}
+
+function shellQuote(value) {
+	return `'${String(value).replace(/'/g, `'\\''`)}'`
+}
+
+function tmuxSessionName(repoName) {
+	const safeName = repoName.toLowerCase().replace(/[^a-z0-9_-]+/g, "-")
+	return `agent-loop-${safeName || "repo"}-${process.pid}`
+}
+
+function tmuxWaveWindowName(waveNumber) {
+	return `wave-${waveNumber}`
+}
+
+function tmuxPaneTitle(issue) {
+	const safeTitle = issue.title
+		.toLowerCase()
+		.replace(/[^a-z0-9_-]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, 32)
+	return `issue-${issue.number}${safeTitle ? `-${safeTitle}` : ""}`
+}
+
+async function assertTmuxAvailable() {
+	const result = await runCommand(["tmux", "-V"])
+	if (result.exitCode !== 0) {
+		throw new Error("--tmux requires tmux to be installed and available on PATH.")
+	}
+}
+
+async function setupTmux(config) {
+	await assertTmuxAvailable()
+	config.tmuxSession = tmuxSessionName(config.repoName)
+	config.tmuxStatusDir = mkdtempSync(join(tmpdir(), "agent-loop-tmux-"))
+	config.tmuxWaveWindows = new Set()
+	config.tmuxWaveLocks = new Map()
+	config.tmuxBootstrapActive = true
+	await runRequiredCommand([
+		"tmux",
+		"new-session",
+		"-d",
+		"-s",
+		config.tmuxSession,
+		"-n",
+		"bootstrap",
+		"sh",
+		"-lc",
+		"sleep 2147483647",
+	])
+	log(`TMUX session: ${config.tmuxSession}`)
+	log(`Attach with: tmux attach -t ${config.tmuxSession}`)
+}
+
+async function startTmuxPane(command, issue, options) {
+	const waveWindow = tmuxWaveWindowName(options.waveNumber)
+	const paneTitle = tmuxPaneTitle(issue)
+	const signal = `agent-loop-${process.pid}-issue-${issue.number}`
+	const statusPath = join(options.statusDir, `issue-${issue.number}.status`)
+	const commandText = command.map(shellQuote).join(" ")
+	const issueTitle = `#${issue.number} ${issue.title}`.replace(/\s+/g, " ").trim()
+	const script = [
+		`cd ${shellQuote(options.cwd)}`,
+		`printf '\\033]2;%s\\033\\\\' ${shellQuote(paneTitle)}`,
+		`echo ${shellQuote(`[agent-loop] START ${issueTitle}`)}`,
+		`echo ${shellQuote(`[agent-loop] Wave: ${options.waveNumber}`)}`,
+		`echo ${shellQuote(`[agent-loop] Worktree: ${options.cwd}`)}`,
+		commandText,
+		"status=$?",
+		"echo",
+		'echo "[agent-loop] exited with code $status"',
+		`printf "%s" "$status" > ${shellQuote(statusPath)}`,
+		`tmux wait-for -S ${shellQuote(signal)}`,
+		'echo "[agent-loop] pane left open for inspection; exit the shell to close it"',
+		'exec "${SHELL:-sh}"',
+	].join("\n")
+
+	const hasWaveWindow = options.waveWindows.has(options.waveNumber)
+	const startResult = hasWaveWindow
+		? await runCommand([
+				"tmux",
+				"split-window",
+				"-t",
+				`${options.session}:${waveWindow}`,
+				"sh",
+				"-lc",
+				script,
+			])
+		: await runCommand([
+				"tmux",
+				"new-window",
+				"-t",
+				options.session,
+				"-n",
+				waveWindow,
+				"sh",
+				"-lc",
+				script,
+			])
+	if (startResult.exitCode !== 0) return { startResult, signal, statusPath }
+
+	options.waveWindows.add(options.waveNumber)
+
+	if (options.bootstrapActive) {
+		await runCommand(["tmux", "kill-window", "-t", `${options.session}:bootstrap`])
+		options.setBootstrapInactive()
+	}
+
+	await runCommand([
+		"tmux",
+		"select-layout",
+		"-t",
+		`${options.session}:${waveWindow}`,
+		"tiled",
+	])
+
+	return { startResult, signal, statusPath }
+}
+
+async function runCommandInTmuxPane(command, issue, options) {
+	const previousLock = options.waveLocks.get(options.waveNumber) ?? Promise.resolve()
+	let releaseLock
+	const currentLock = new Promise((resolveLock) => {
+		releaseLock = resolveLock
+	})
+	options.waveLocks.set(
+		options.waveNumber,
+		previousLock.then(() => currentLock),
+	)
+
+	await previousLock
+	let pane
+	try {
+		pane = await startTmuxPane(command, issue, options)
+	} finally {
+		releaseLock()
+	}
+
+	if (pane.startResult.exitCode !== 0) return pane.startResult
+
+	const waitResult = await runCommand(["tmux", "wait-for", pane.signal])
+	if (waitResult.exitCode !== 0) return waitResult
+
+	const exitCode = Number(readFileSync(pane.statusPath, "utf8"))
+	return { exitCode, stdout: "", stderr: "" }
 }
 
 async function fetchEligibleIssues(labels) {
@@ -653,13 +787,24 @@ async function runAgent(issue, baseBranch, config) {
 	log(`LABEL #${issue.number}: ${config.inProgressLabel}`)
 	log(`${"=".repeat(72)}`)
 
-	const result = await runCommand(
-		buildAgentCommand(config.agent, prompt, worktreePath),
-		{
-			cwd: worktreePath,
-			streamToLog: true,
-		},
-	)
+	const agentCommand = buildAgentCommand(config.agent, prompt, worktreePath)
+	const result = config.tmux
+		? await runCommandInTmuxPane(agentCommand, issue, {
+				cwd: worktreePath,
+				session: config.tmuxSession,
+				statusDir: config.tmuxStatusDir,
+				waveNumber: config.issueWaves.get(issue.number) ?? 1,
+				waveWindows: config.tmuxWaveWindows,
+				waveLocks: config.tmuxWaveLocks,
+				bootstrapActive: config.tmuxBootstrapActive,
+				setBootstrapInactive: () => {
+					config.tmuxBootstrapActive = false
+				},
+			})
+		: await runCommand(agentCommand, {
+				cwd: worktreePath,
+				streamOutput: true,
+			})
 
 	if (result.exitCode === 0) {
 		log(`DONE  #${issue.number}: agent exited cleanly`)
@@ -873,6 +1018,12 @@ async function main() {
 	for (const line of renderDependencyTree(ordered)) {
 		log(line)
 	}
+	config.issueWaves = new Map()
+	for (const [index, wave] of waves.entries()) {
+		for (const issue of wave) {
+			config.issueWaves.set(issue.number, index + 1)
+		}
+	}
 
 	if (config.dryRun) {
 		log("Dry run complete.")
@@ -881,7 +1032,15 @@ async function main() {
 
 	await assertCleanWorktree()
 	const baseBranch = config.baseBranch ?? (await getCurrentBranch())
-	const states = await runScheduler(ordered, baseBranch, config)
+	if (config.tmux) await setupTmux(config)
+	let states
+	try {
+		states = await runScheduler(ordered, baseBranch, config)
+	} finally {
+		if (config.tmuxStatusDir) {
+			rmSync(config.tmuxStatusDir, { recursive: true, force: true })
+		}
+	}
 	const failed = [...states.entries()].filter(([, state]) =>
 		["failed", "skipped"].includes(state),
 	)

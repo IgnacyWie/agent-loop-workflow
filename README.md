@@ -53,6 +53,7 @@ agent-loop
 agent-loop --agent codex
 agent-loop --agent claude
 agent-loop --parallel 3
+agent-loop --parallel 3 --tmux
 agent-loop --dry-run
 agent-loop --setup-labels
 agent-loop --labels ready-for-agent,automated-agent
@@ -88,7 +89,7 @@ Use those skills to stress-test an idea, turn it into a PRD, and break it into i
 
 Dependencies are inferred from issue bodies. If both issues are in the selected set, `agent-loop` waits for the dependency issue to complete first.
 
-Dry runs and normal runs print execution waves followed by a dependency tree. Each issue shows what blocks it and what it unblocks, so you can see the runnable issues and blocked follow-up work before agents start.
+Dry runs and normal runs print execution waves followed by an ASCII dependency tree so you can see blockers/unblocks at a glance.
 
 Supported inline forms:
 
@@ -119,6 +120,7 @@ Supported section forms:
 | `--worktree-dir <path>` | `.agent-worktrees` | Directory for git worktrees |
 | `--base-branch <branch>` | current branch | Branch used for new issue worktrees |
 | `--repo-name <name>` | current directory name | Human-readable repository name in agent prompts |
+| `--tmux` | `false` | Run agent commands in tmux with one window per dependency wave and split panes for active issues |
 | `--setup-labels` | `false` | Create or update required GitHub issue labels, then exit |
 | `--dry-run` | `false` | Print planned execution waves without running agents |
 | `--no-close` | `false` | Merge successful branches but do not close GitHub issues |
@@ -134,16 +136,34 @@ AGENT_LOOP_IN_PROGRESS_LABEL=aa-in-progress
 AGENT_LOOP_WORKTREE_DIR=.agent-worktrees
 AGENT_LOOP_BASE_BRANCH=main
 AGENT_LOOP_REPO_NAME=my-repo
+AGENT_LOOP_TMUX=1
 AGENT_LOOP_NO_CLOSE=1
 ```
+
+## Tmux Mode
+
+Pass `--tmux` to watch active agents in tmux:
+
+```sh
+agent-loop --parallel 5 --tmux
+```
+
+The parent process prints the session name and attach command before agents start. Each dependency wave gets one tmux window/tab named `wave-N`. Issues in that wave run as split panes in the same tab with a tiled layout.
+
+Issue panes stay open after the agent exits so you can inspect terminal output without a separate log file. Exit the pane shell when you are done with it. Failed branches and worktrees are still preserved for inspection.
+
+`agent-loop` does not write run log files. In non-tmux mode, agent output streams directly to the launching terminal.
 
 ## Development
 
 ```sh
 npm run check
+npm run demo:tree
 npm test
 npm run test:package
 ```
+
+`npm run demo:tree` prints a local sample dependency tree using fake issue data. It does not call GitHub or create commits.
 
 ## Safety Model
 

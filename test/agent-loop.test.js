@@ -3,6 +3,7 @@ import {
 	chmodSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	writeFileSync,
 } from "node:fs"
@@ -69,12 +70,22 @@ exit 1
 	assert.match(result.stdout, /Wave 3: #4 Wire product/)
 	assert.match(result.stdout, /Dependency tree:/)
 	assert.match(result.stdout, /#1 Prepare base/)
-	assert.match(result.stdout, /blocked by: none/)
-	assert.match(result.stdout, /unblocks: #2 Build API, #3 Build UI/)
-	assert.match(result.stdout, /#4 Wire product/)
-	assert.match(result.stdout, /blocked by: #2 Build API, #3 Build UI/)
-	assert.match(result.stdout, /#5 Standalone cleanup/)
+	assert.match(result.stdout, /\|-- #1 Prepare base/)
+	assert.match(result.stdout, /\|   \|-- #2 Build API/)
+	assert.match(result.stdout, /`-- #5 Standalone cleanup/)
 	assert.match(result.stdout, /Dry run complete\./)
+	assert.deepEqual(
+		readdirSync(cwd).filter((name) => /^agent-loop-.*\.log$/.test(name)),
+		[],
+	)
+})
+
+test("help documents tmux mode", () => {
+	const cwd = makeTempRepo()
+	const result = runCli(cwd, cwd, ["--help"])
+
+	assert.equal(result.status, 0, result.stderr)
+	assert.match(result.stdout, /--tmux\s+Run agents in tmux with one window per wave/)
 })
 
 test("setup labels creates the required labels and in-progress label", () => {

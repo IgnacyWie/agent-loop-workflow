@@ -13,6 +13,7 @@
 	],
 	"scripts": {
 		"check": "node --check bin/agent-loop.js",
+		"demo:tree": "node scripts/tree-ui-demo.js",
 		"test": "node --test",
 		"test:package": "npm pack --dry-run",
 		"setup:labels": "node bin/agent-loop.js --setup-labels"
